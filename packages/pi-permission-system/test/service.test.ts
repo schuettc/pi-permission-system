@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AccessIntent } from "#src/access-intent/access-intent";
 import { AuthorizerRegistry } from "#src/authority/authorizer-registry";
+import { OpenPromptRegistry } from "#src/authority/prompt-answerer-registry";
 import { posixPathFlavor } from "#src/path/path-flavor";
 import { PathNormalizer } from "#src/path/path-normalizer";
 import type { PermissionsService } from "#src/service";
@@ -229,6 +230,11 @@ describe("service round-trip through the keyed locator", () => {
         new ToolInputFormatterRegistry(),
         new ToolAccessExtractorRegistry(),
         new AuthorizerRegistry(),
+        {
+          getPromptAnswerers: () => [],
+          registry: new OpenPromptRegistry(),
+          warn: () => undefined,
+        },
       ),
     );
   }

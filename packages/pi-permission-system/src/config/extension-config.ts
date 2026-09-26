@@ -35,6 +35,8 @@ export interface PermissionSystemExtensionConfig {
   shellTools?: ShellToolsConfig;
   /** Ordered names of registered live-authority chain links to consult before the terminal authorizer. */
   authorizerChain?: string[];
+  /** Names of registered prompt answerers permitted to settle a showing prompt remotely (opt-in mirror of authorizerChain). */
+  promptAnswerers?: string[];
 }
 
 export const DEFAULT_EXTENSION_CONFIG: PermissionSystemExtensionConfig = {
@@ -102,6 +104,9 @@ export function normalizePermissionSystemConfig(
   }
   if (raw.authorizerChain !== undefined) {
     result.authorizerChain = raw.authorizerChain;
+  }
+  if (raw.promptAnswerers !== undefined) {
+    result.promptAnswerers = raw.promptAnswerers;
   }
   return result;
 }

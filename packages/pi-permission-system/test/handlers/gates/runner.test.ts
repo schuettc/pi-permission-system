@@ -56,6 +56,24 @@ describe("GateRunner — descriptor path", () => {
     );
   });
 
+  it("stamps decidedBy on the decision event with the gate's decider", async () => {
+    const { runner, deps } = makeGateRunner({
+      resolveResult: makeCheckResult({ state: "deny", matchedPattern: "*" }),
+    });
+    await runner.run(makeDescriptor(), null);
+    expect(deps.reporter.emitDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: "deny",
+        decidedBy: {
+          kind: "rule",
+          surface: "read",
+          pattern: "*",
+          origin: "builtin",
+        },
+      }),
+    );
+  });
+
   it("records which rule denied a blocked request", async () => {
     const { runner, deps } = makeGateRunner({
       resolveResult: makeCheckResult({ state: "deny", matchedPattern: "rm *" }),
@@ -943,6 +961,7 @@ describe("GateRunner.run — null and bypass dispatch", () => {
       value: "/x",
       result: "allow" as const,
       resolution: "policy_allow" as const,
+      decidedBy: { kind: "infrastructure_read" as const },
       origin: null,
       agentName: null,
       matchedPattern: null,
@@ -1135,6 +1154,7 @@ describe("GateRunner — request identity", () => {
         value: "/x",
         result: "allow",
         resolution: "infrastructure_auto_allowed",
+        decidedBy: { kind: "infrastructure_read" },
         origin: null,
         agentName: null,
         matchedPattern: null,

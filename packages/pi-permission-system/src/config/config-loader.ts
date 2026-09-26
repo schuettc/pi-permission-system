@@ -237,7 +237,11 @@ export function mergeUnifiedConfigs(
   }
 
   // Array fields: override replaces base when defined
-  for (const key of ["piInfrastructureReadPaths", "authorizerChain"] as const) {
+  for (const key of [
+    "piInfrastructureReadPaths",
+    "authorizerChain",
+    "promptAnswerers",
+  ] as const) {
     const value = override[key] ?? base[key];
     if (value !== undefined) {
       merged[key] = value;

@@ -156,6 +156,12 @@ describe("emitDecisionEvent", () => {
       value: "git status",
       result: "allow",
       resolution: "policy_allow",
+      decidedBy: {
+        kind: "rule",
+        surface: "bash",
+        pattern: "*",
+        origin: "global",
+      },
       origin: "global",
       agentName: null,
       matchedPattern: "*",
