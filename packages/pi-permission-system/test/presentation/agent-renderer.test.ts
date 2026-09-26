@@ -610,6 +610,18 @@ describe("renderRefusal", () => {
     );
   });
 
+  it("names the answerer when a prompt answerer refused", () => {
+    expect(
+      renderRefusal(
+        bashPayload(),
+        { kind: "answerer", name: "pi-hail" },
+        "declined on the phone",
+      ),
+    ).toBe(
+      "[pi-permission-system] Denied from 'pi-hail': this 'bash' call (rule 'rm *'). Reason: declined on the phone.",
+    );
+  });
+
   it("names the user when a human refused", () => {
     expect(renderRefusal(bashPayload(), human, "not with sudo")).toBe(
       "[pi-permission-system] The user denied this 'bash' call (rule 'rm *'). Reason: not with sudo.",

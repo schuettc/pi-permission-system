@@ -66,6 +66,13 @@ describe("buildDecisionEvent", () => {
     };
   }
 
+  const RULE_SOURCE = {
+    kind: "rule",
+    surface: "read",
+    pattern: "read",
+    origin: "global",
+  } as const;
+
   it("builds a decision event with all fields populated", () => {
     const event = buildDecisionEvent(
       { surface: "read", value: "read" },
@@ -73,12 +80,14 @@ describe("buildDecisionEvent", () => {
       "test-agent",
       "allow",
       "policy_allow",
+      RULE_SOURCE,
     );
     expect(event).toEqual({
       surface: "read",
       value: "read",
       result: "allow",
       resolution: "policy_allow",
+      decidedBy: RULE_SOURCE,
       origin: "global",
       agentName: "test-agent",
       matchedPattern: "read",
@@ -92,6 +101,7 @@ describe("buildDecisionEvent", () => {
       null,
       "allow",
       "user_approved",
+      { kind: "user", via: "dialog" },
     );
     expect(event.origin).toBeNull();
   });
@@ -103,6 +113,7 @@ describe("buildDecisionEvent", () => {
       null,
       "deny",
       "policy_deny",
+      RULE_SOURCE,
     );
     expect(event.agentName).toBeNull();
   });
@@ -114,6 +125,7 @@ describe("buildDecisionEvent", () => {
       null,
       "deny",
       "policy_deny",
+      RULE_SOURCE,
     );
     expect(event.matchedPattern).toBeNull();
   });
@@ -125,6 +137,7 @@ describe("buildDecisionEvent", () => {
       null,
       "deny",
       "user_denied",
+      { kind: "user", via: "dialog" },
     );
     expect(event.result).toBe("deny");
     expect(event.resolution).toBe("user_denied");

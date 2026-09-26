@@ -27,6 +27,12 @@ export type DecisionSource =
       verdict: "allow" | "deny";
       reason: string | null;
     }
+  /**
+   * A registered prompt answerer settled a showing prompt remotely (e.g. the
+   * phone answered through `registerPromptAnswerer`); `name` is the answerer's
+   * registered name, which is also what the `promptAnswerers` config gates.
+   */
+  | { kind: "answerer"; name: string }
   /** Recorded authority: a rule in the composed ruleset matched. */
   | {
       kind: "rule";
@@ -129,6 +135,10 @@ function narrowSource(
       return narrowUser(candidate);
     case "authorizer":
       return narrowAuthorizer(candidate);
+    case "answerer":
+      return typeof candidate.name === "string"
+        ? { kind: "answerer", name: candidate.name }
+        : undefined;
     case "rule":
       return narrowRule(candidate);
     case "session_approval":

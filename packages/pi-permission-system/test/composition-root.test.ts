@@ -52,8 +52,12 @@ import { SESSION_ENDED_REASON } from "#src/handlers/lifecycle";
 import piPermissionSystemExtension from "#src/index";
 import { getPermissionsService } from "#src/service";
 import {
+  PERMISSIONS_DECISION_CHANNEL,
   PERMISSIONS_READY_CHANNEL,
+  PERMISSIONS_UI_PROMPT_CHANNEL,
+  type PermissionDecisionEvent,
   type PermissionsReadyEvent,
+  type PermissionUiPromptEvent,
 } from "#src/service/permission-events";
 import { publishServingHeartbeat } from "#test/helpers/forwarding-fixtures";
 import { makeFakePi } from "#test/helpers/make-fake-pi";
@@ -2375,6 +2379,107 @@ describe("configured permission-dialog hotkeys reach the inline dialog", () => {
           message.includes("bash commands silently inherit 'allow'"),
         ),
       ).toHaveLength(1);
+
+      rmSync(cwd, { recursive: true, force: true });
+    });
+  });
+
+  describe("prompt-answer seam end to end", () => {
+    /**
+     * Drive a `demo` ask under a UI whose `select` never resolves, so the only
+     * thing that can settle the prompt is a remote answer, and capture the
+     * broadcast prompt/decision events plus the pending tool-call promise.
+     */
+    function driveOpenAsk(cwd: string, promptAnswerers: string[]) {
+      writeGlobalConfig({
+        permission: { "*": "allow", demo: "ask" },
+        promptAnswerers,
+      });
+      const pi = makeFakePi({ toolNames: ["demo"] });
+      piPermissionSystemExtension(pi as unknown as ExtensionAPI);
+      const decisions: PermissionDecisionEvent[] = [];
+      pi.events.on(PERMISSIONS_DECISION_CHANNEL, (event) => {
+        decisions.push(event as PermissionDecisionEvent);
+      });
+      let promptRequestId: string | undefined;
+      pi.events.on(PERMISSIONS_UI_PROMPT_CHANNEL, (event) => {
+        promptRequestId = (event as PermissionUiPromptEvent).requestId;
+      });
+      const ctx = makeBaseCtx(cwd, "ui-session", {
+        select: () => new Promise<string | undefined>(() => undefined),
+      });
+      return { pi, ctx, decisions, requestId: () => promptRequestId };
+    }
+
+    it("lets a listed answerer deny the showing prompt and names it everywhere", async () => {
+      const cwd = mkdtempSync(join(tmpdir(), "pi-perm-answerer-cwd-"));
+      const driver = driveOpenAsk(cwd, ["pi-hail"]);
+      await fireSessionStart(driver.pi, driver.ctx);
+
+      const answerer =
+        getPermissionsService("ui-session")!.registerPromptAnswerer("pi-hail");
+
+      const gated = driver.pi.fire(
+        "tool_call",
+        { toolName: "demo", toolCallId: "demo-answerer", input: {} },
+        driver.ctx,
+      ) as Promise<{ block?: true; reason?: string }>;
+      await sleep(10);
+
+      const requestId = driver.requestId();
+      expect(requestId).toBeDefined();
+      expect(answerer.answer(requestId!, "deny")).toBe(true);
+
+      const result = await gated;
+      expect(result.block).toBe(true);
+      // The agent-facing denial names the answerer.
+      expect(result.reason).toContain("pi-hail");
+
+      // The decision event carries the answerer resolution + provenance.
+      const decision = driver.decisions.find((d) => d.requestId === requestId);
+      expect(decision?.resolution).toBe("answerer_denied");
+      expect(decision?.decidedBy).toEqual({
+        kind: "answerer",
+        name: "pi-hail",
+      });
+
+      // The review log records the answerer name.
+      const denied = (readReviewLog() as { decidedBy?: unknown }[]).find(
+        (entry) =>
+          typeof entry.decidedBy === "object" &&
+          entry.decidedBy !== null &&
+          (entry.decidedBy as { kind?: string }).kind === "answerer",
+      );
+      expect(denied?.decidedBy).toEqual({ kind: "answerer", name: "pi-hail" });
+
+      rmSync(cwd, { recursive: true, force: true });
+    });
+
+    it("leaves an unlisted answerer inert: its answer does not settle the prompt", async () => {
+      const cwd = mkdtempSync(join(tmpdir(), "pi-perm-answerer-off-cwd-"));
+      const driver = driveOpenAsk(cwd, []);
+      await fireSessionStart(driver.pi, driver.ctx);
+
+      const answerer =
+        getPermissionsService("ui-session")!.registerPromptAnswerer("pi-hail");
+
+      const gated = driver.pi.fire(
+        "tool_call",
+        { toolName: "demo", toolCallId: "demo-inert", input: {} },
+        driver.ctx,
+      ) as Promise<{ block?: true; reason?: string }>;
+      await sleep(10);
+
+      const requestId = driver.requestId();
+      expect(requestId).toBeDefined();
+      // Unlisted: the answer is a no-op and the prompt stays open.
+      expect(answerer.answer(requestId!, "deny")).toBe(false);
+
+      await driver.pi.fire("session_shutdown");
+      const result = await gated;
+      // Released by shutdown, never by the answerer.
+      expect(result.block).toBe(true);
+      expect(result.reason).not.toContain("pi-hail");
 
       rmSync(cwd, { recursive: true, force: true });
     });

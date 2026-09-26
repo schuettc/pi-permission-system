@@ -1,6 +1,7 @@
 import type { AccessPath } from "#src/access-intent/access-path";
 import type { ToolPathSource } from "#src/access-intent/tool-input-path";
 import { classifyToolKind } from "#src/access-intent/tool-kind";
+import type { DecisionSource } from "#src/authority/decision-source";
 import type { ForwardedAccessFacts } from "#src/authority/permission-forwarding";
 import type { PromptPermissionDetails } from "#src/authority/permission-prompter";
 import type { PermissionDecisionResolution } from "#src/service/permission-events";
@@ -139,12 +140,14 @@ export function buildDecisionEvent(
   agentName: string | null,
   result: "allow" | "deny",
   resolution: PermissionDecisionResolution,
+  decidedBy: DecisionSource,
 ): DecisionEventFacts {
   return {
     surface: decision.surface,
     value: decision.value,
     result,
     resolution,
+    decidedBy,
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ?? null normalises undefined to null for the log record
     origin: check.origin ?? null,
     agentName: agentName ?? null,
