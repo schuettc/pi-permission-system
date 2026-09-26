@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { AccessIntent } from "#src/access-intent/access-intent";
 import type { AuthorizerRegistrar } from "#src/authority/authorizer-registry";
+import { OpenPromptRegistry } from "#src/authority/prompt-answerer-registry";
 import { posixPathFlavor } from "#src/path/path-flavor";
 import { PathNormalizer } from "#src/path/path-normalizer";
 import { LocalPermissionsService } from "#src/service/permissions-service";
@@ -99,6 +100,9 @@ function makeService(overrides?: {
   accessExtractorRegistry?: ToolAccessExtractorRegistrar &
     ToolAccessExtractorLookup;
   authorizerRegistry?: AuthorizerRegistrar;
+  promptAnswerers?: string[];
+  registry?: OpenPromptRegistry;
+  warn?: (message: string) => void;
 }) {
   const resolver = overrides?.resolver ?? makeResolver();
   // The published service always answers against the parent session's cwd.
@@ -109,12 +113,19 @@ function makeService(overrides?: {
     overrides?.accessExtractorRegistry ?? makeAccessExtractorRegistry();
   const authorizerRegistry =
     overrides?.authorizerRegistry ?? makeAuthorizerRegistry();
+  const registry = overrides?.registry ?? new OpenPromptRegistry();
+  const warn = overrides?.warn ?? vi.fn();
   const service = new LocalPermissionsService(
     resolver,
     session,
     formatterRegistry,
     accessExtractorRegistry,
     authorizerRegistry,
+    {
+      getPromptAnswerers: () => overrides?.promptAnswerers ?? [],
+      registry,
+      warn,
+    },
   );
   return {
     service,
@@ -122,6 +133,8 @@ function makeService(overrides?: {
     formatterRegistry,
     accessExtractorRegistry,
     authorizerRegistry,
+    registry,
+    warn,
   };
 }
 
@@ -360,5 +373,54 @@ describe("registerAuthorizer", () => {
       authorize,
     );
     expect(result).toBe(unsub);
+  });
+});
+
+describe("registerPromptAnswerer", () => {
+  it("exposes an answer/dispose capability", () => {
+    const { service } = makeService();
+    const answerer = service.registerPromptAnswerer("pi-hail");
+    expect(typeof answerer.answer).toBe("function");
+    expect(typeof answerer.dispose).toBe("function");
+  });
+
+  it("settles a showing prompt when the answerer is listed", () => {
+    const registry = new OpenPromptRegistry();
+    const settle = vi.fn();
+    registry.register("req-1", settle);
+    const { service } = makeService({
+      promptAnswerers: ["pi-hail"],
+      registry,
+    });
+
+    const answerer = service.registerPromptAnswerer("pi-hail");
+    expect(answerer.answer("req-1", "allow")).toBe(true);
+    expect(settle).toHaveBeenCalledWith("allow", "pi-hail");
+  });
+
+  it("is inert and warns once when the answerer is not listed", () => {
+    const registry = new OpenPromptRegistry();
+    const settle = vi.fn();
+    registry.register("req-1", settle);
+    const warn = vi.fn();
+    const { service } = makeService({
+      promptAnswerers: [],
+      registry,
+      warn,
+    });
+
+    const answerer = service.registerPromptAnswerer("pi-hail");
+    expect(answerer.answer("req-1", "allow")).toBe(false);
+    expect(answerer.answer("req-1", "deny")).toBe(false);
+    expect(settle).not.toHaveBeenCalled();
+    // Logged once, not once per answer.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("pi-hail");
+  });
+
+  it("reports false when the answer targets no open prompt", () => {
+    const { service } = makeService({ promptAnswerers: ["pi-hail"] });
+    const answerer = service.registerPromptAnswerer("pi-hail");
+    expect(answerer.answer("missing", "allow")).toBe(false);
   });
 });

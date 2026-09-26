@@ -164,8 +164,9 @@ function toAccessFacts(intent: ForwardedAccessIntent): ForwardedAccessFacts {
  *
  * `origin` and `matchedPattern` are `null` by construction: an escalated
  * request is one recorded authority did *not* decide, so no rule won. The
- * decider stays off the bus, which discloses request facts and verdicts only
- * (ADR 0011 §6, #726).
+ * winning *rule* stays off the bus (ADR 0011 §6, #726); the `decidedBy`
+ * provenance the requesting side reads to attribute the decision is carried,
+ * as it is on every local decision event.
  */
 function buildServedDecisionEvent(
   details: PromptPermissionDetails,
@@ -191,6 +192,7 @@ function buildServedDecisionEvent(
         decision.state === "approved_for_session" ||
         decision.state === "approved_for_serving_session",
     }),
+    decidedBy: decision.decidedBy,
     origin: null,
     matchedPattern: null,
     forwarding: details.forwarding ?? null,

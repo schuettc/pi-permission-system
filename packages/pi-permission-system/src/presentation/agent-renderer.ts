@@ -80,6 +80,8 @@ export function renderRefusal(
         denialReason,
         budget,
       );
+    case "answerer":
+      return renderAnswererDenial(payload, decider.name, denialReason, budget);
     case "unavailable":
       return renderUnavailableDenial(payload, denialReason, budget);
     case "rule":
@@ -150,6 +152,26 @@ export function renderAuthorizerDenial(
 ): string {
   return tagged(
     `The '${linkName}' authorizer denied this ${identification(payload, budget, "call", askRuleClause(payload))}${boundaryClause(payload)}${provenanceClause(payload)}.`,
+    denialReason,
+  );
+}
+
+/**
+ * The agent-facing render of a registered prompt answerer's refusal.
+ *
+ * Names the answerer, because "a surface the operator configured refused this"
+ * and "the operator refused this" are different facts, the same reason
+ * {@link renderAuthorizerDenial} names its link. The name is operator
+ * configuration rather than agent input, so it is not capped.
+ */
+export function renderAnswererDenial(
+  payload: PromptPayload,
+  answererName: string,
+  denialReason: string | null,
+  budget: AgentRenderBudget = DEFAULT_RENDER_BUDGET,
+): string {
+  return tagged(
+    `Denied from '${answererName}': this ${identification(payload, budget, "call", askRuleClause(payload))}${boundaryClause(payload)}${provenanceClause(payload)}.`,
     denialReason,
   );
 }

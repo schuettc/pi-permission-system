@@ -27,6 +27,7 @@ import {
 import { PERMISSION_FORWARDING_TIMEOUT_MS } from "#src/authority/permission-forwarding";
 import { requestPermissionDecision } from "#src/authority/permission-prompt-component";
 import { PermissionPrompter } from "#src/authority/permission-prompter";
+import { OpenPromptRegistry } from "#src/authority/prompt-answerer-registry";
 import {
   composeServingAnnouncers,
   getServingSessionRegistry,
@@ -138,6 +139,11 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
   // presentation there strands the first ask's promise (#965).
   const askDialogQueue = new AskDialogQueue();
 
+  // The showing-prompt registry, per factory invocation like askDialogQueue: a
+  // listed prompt answerer (the phone, via pi-hail) settles a dialog through
+  // it, and it is rebuilt with the session so no entry outlives its prompt.
+  const promptAnswererRegistry = new OpenPromptRegistry();
+
   // The filesystem half of the serving announcement. `servingRegistry` reaches
   // an in-process child through `globalThis`; a child in its own process shares
   // nothing but this directory, so the served session publishes a heartbeat
@@ -168,6 +174,7 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
     getForwardingTimeoutMs: () =>
       configStore.current().forwardingTimeoutMs ??
       PERMISSION_FORWARDING_TIMEOUT_MS,
+    promptAnswererRegistry,
     logger,
     prompter,
     // The published service is the narrow, session-scoped PermissionQuery a
@@ -278,6 +285,13 @@ export default function piPermissionSystemExtension(pi: ExtensionAPI): void {
       authorizerSelection,
       logger,
     ),
+    {
+      // Opt-in mirror of authorizerChain: an answer settles a showing prompt
+      // only when the operator listed the answerer here (read live).
+      getPromptAnswerers: () => configStore.current().promptAnswerers ?? [],
+      registry: promptAnswererRegistry,
+      warn: (message) => logger.warn(message),
+    },
   );
 
   // Subscribe to @gotgenes/pi-subagents' child lifecycle events so child

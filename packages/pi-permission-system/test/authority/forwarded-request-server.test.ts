@@ -1296,6 +1296,7 @@ describe("processInbox — terminal decision broadcast", () => {
         agentName: "Explore",
         result: "allow",
         resolution: "user_approved",
+        decidedBy: DECIDED_BY_HUMAN,
         origin: null,
         matchedPattern: null,
         forwarding: {
