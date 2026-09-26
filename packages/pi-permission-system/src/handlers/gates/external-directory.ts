@@ -64,6 +64,7 @@ export function describeExternalDirectoryGate(
         value: externalDirectoryPath,
         result: "allow",
         resolution: "infrastructure_auto_allowed",
+        decidedBy: { kind: "infrastructure_read" },
         origin: null,
         agentName: tcc.agentName ?? null,
         matchedPattern: null,

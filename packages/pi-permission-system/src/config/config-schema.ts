@@ -425,6 +425,13 @@ export const unifiedConfigSchema = z
         "Ordered names of registered **live-authority chain links** (e.g. a model judge) to consult before the terminal authorizer (the human, or the subagent-forwarding / headless-deny fallback).\n\nA link reviews an `ask` and returns `allow` / `deny` (with an optional teaching reason) / `defer` to the next link. Three invariants govern the chain:\n\n- **Config order wins.** The order here \u2014 not the order extensions register in \u2014 fixes the security-relevant chain order.\n- **Fail-safe skip.** A name with no registered link is skipped with a warning; the `ask` still reaches the terminal (more prompting, never less).\n- **Opt-in activation.** Installing a judge extension grants it no authority; a link decides nothing until you name it here.\n\nThe chain owner caps every verdict with a bounded-delegation checkpoint: a link's `allow` on an excluded surface (`external_directory` or `path`) is downgraded to `defer`, so a link cannot exceed your policy.\n\nDefaults to an empty list (no links).",
       default: [],
     }),
+    promptAnswerers: z.array(z.string().min(1)).optional().meta({
+      description:
+        "Names of registered prompt answerers permitted to settle a showing permission prompt remotely (e.g. the phone, via pi-hail). Opt-in mirror of authorizerChain: registration grants nothing; an answerer decides nothing until it is named here. Defaults to an empty list (no answerers).",
+      markdownDescription:
+        "Names of registered **prompt answerers** permitted to settle a showing permission prompt remotely \u2014 an answerer answers the same dialog the permission system already put on screen (the phone answering through `pi-hail`, for example).\n\nThis is the opt-in mirror of `authorizerChain`: an extension that calls `registerPromptAnswerer` gains **no authority** by registering; its `answer` is effective only once you name it here. An unlisted answerer's `answer` returns `false` and is logged once.\n\nA remote answer approves once or denies, with no reason text; session-scope grants stay on the Mac dialog. Defaults to an empty list (no answerers).",
+      default: [],
+    }),
     permission: permissionSchema.optional(),
     shellTools: shellToolsSchema.optional(),
   })

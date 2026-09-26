@@ -12,6 +12,7 @@ import { buildUiPrompt } from "#src/service/permission-ui-prompt";
 import { provenDirectionOf } from "#src/session/approval-grant";
 import type { AskDialogAdmission } from "./ask-dialog-queue";
 import type { TerminalAuthorizer } from "./authorizer";
+import type { DecisionSource } from "./decision-source";
 import type {
   PermissionPromptDecision,
   RequestPermissionOptions,
@@ -22,6 +23,7 @@ import type {
   requestPermissionDecision,
 } from "./permission-prompt-component";
 import type { PromptPermissionDetails } from "./permission-prompter";
+import type { OpenPromptRegistry } from "./prompt-answerer-registry";
 
 /** Dependencies required by {@link LocalUserAuthorizer}. */
 export interface LocalUserAuthorizerDeps {
@@ -37,6 +39,16 @@ export interface LocalUserAuthorizerDeps {
   getPromptPreferences: () => PromptPreferences;
   /** Injected for testability; production callers pass the real function. */
   requestPermissionDecision: typeof requestPermissionDecision;
+  /**
+   * The node's open-prompt registry, when the answerer seam is wired.
+   *
+   * When present, a showing prompt is registered under its `requestId` so a
+   * listed prompt answerer can settle it remotely, and unregistered on every
+   * resolution path. Absent leaves the dialog the only way to answer -- the
+   * fail-safe default, and what keeps the many tests that never exercise the
+   * seam calling `requestPermissionDecision` with its original arguments.
+   */
+  registry?: OpenPromptRegistry;
 }
 
 /**
@@ -59,10 +71,22 @@ export class LocalUserAuthorizer implements TerminalAuthorizer {
   authorize(
     details: PromptPermissionDetails,
   ): Promise<PermissionPromptDecision> {
-    return this.deps.dialogs.run(
-      () => this.present(details),
+    // The registry disposer is hung off the *outer* run promise, not the inner
+    // `present()` one: a release settles the outer promise while the host's own
+    // dialog promise (what `present()` awaits) is left pending forever, so a
+    // `.finally` on the inner promise would never run and the entry would stay
+    // registered — letting a shutdown-time `answer()` return a misleading
+    // `true`. Disposing on the outer settle covers the human, remote, and
+    // release paths alike.
+    let dispose: (() => void) | undefined;
+    const decision = this.deps.dialogs.run(
+      () =>
+        this.present(details, (disposer) => {
+          dispose = disposer;
+        }),
       unansweredDecision,
     );
+    return decision.finally(() => dispose?.());
   }
 
   /**
@@ -75,21 +99,64 @@ export class LocalUserAuthorizer implements TerminalAuthorizer {
    */
   private present(
     details: PromptPermissionDetails,
+    captureDispose: (dispose: () => void) => void,
   ): Promise<PermissionPromptDecision> {
     emitUiPromptEvent(this.deps.events, buildUiPrompt(details));
+    const view = {
+      mode: this.deps.mode,
+      ui: this.deps.ui,
+      ...this.deps.getPromptPreferences(),
+    };
+    const title = details.forwarding
+      ? "Permission Required (Subagent)"
+      : "Permission Required";
+    const options = buildRequestOptions(details);
+    const registry = this.deps.registry;
+    if (!registry) {
+      return this.deps.requestPermissionDecision(
+        view,
+        title,
+        details.payload,
+        options,
+      );
+    }
+    // Register the showing prompt so a listed answerer can settle it, and
+    // unregister on every resolution path. The registration happens as the
+    // dialog goes on screen (`onPrompt`), never at admission, so a queued ask
+    // has no entry to answer (section 4 of the design).
     return this.deps.requestPermissionDecision(
-      {
-        mode: this.deps.mode,
-        ui: this.deps.ui,
-        ...this.deps.getPromptPreferences(),
-      },
-      details.forwarding
-        ? "Permission Required (Subagent)"
-        : "Permission Required",
+      view,
+      title,
       details.payload,
-      buildRequestOptions(details),
+      options,
+      {
+        onPrompt: (control) => {
+          captureDispose(
+            registry.register(details.requestId, (verdict, answererName) =>
+              control.settleRemotely(answererDecision(verdict, answererName)),
+            ),
+          );
+        },
+      },
     );
   }
+}
+
+/**
+ * The decision a remote answerer's verdict becomes: an approve-once or a plain
+ * deny, stamped with the answerer as its decider so the resolution reads
+ * `answerer_approved` / `answerer_denied` and the review log and agent-facing
+ * denial name it (#726). A remote answer never scopes a session grant -- that
+ * choice stays on the Mac dialog (section 3 of the design).
+ */
+function answererDecision(
+  verdict: "allow" | "deny",
+  answererName: string,
+): PermissionPromptDecision {
+  const decidedBy: DecisionSource = { kind: "answerer", name: answererName };
+  return verdict === "allow"
+    ? { approved: true, state: "approved", decidedBy }
+    : { approved: false, state: "denied", decidedBy };
 }
 
 /**

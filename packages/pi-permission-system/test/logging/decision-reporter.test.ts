@@ -36,6 +36,12 @@ function makeDecisionEvent(
     value: "read",
     result: "allow",
     resolution: "policy_allow",
+    decidedBy: {
+      kind: "rule",
+      surface: "read",
+      pattern: null,
+      origin: "global",
+    },
     origin: "global",
     agentName: null,
     matchedPattern: null,

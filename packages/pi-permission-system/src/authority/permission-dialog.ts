@@ -1,3 +1,4 @@
+import type { ExtensionUIDialogOptions } from "@earendil-works/pi-coding-agent";
 import type { SessionGrantWidth } from "#src/session/approval-grant";
 import type { DecisionSource } from "./decision-source";
 
@@ -56,8 +57,16 @@ export type PermissionPromptDecision = {
 export type UnattributedDecision = Omit<PermissionPromptDecision, "decidedBy">;
 
 export interface PermissionDecisionUi {
-  select(title: string, options: string[]): Promise<string | undefined>;
-  input(title: string, placeholder?: string): Promise<string | undefined>;
+  select(
+    title: string,
+    options: string[],
+    opts?: ExtensionUIDialogOptions,
+  ): Promise<string | undefined>;
+  input(
+    title: string,
+    placeholder?: string,
+    opts?: ExtensionUIDialogOptions,
+  ): Promise<string | undefined>;
 }
 
 const APPROVE_OPTION = "Yes";
@@ -145,7 +154,15 @@ export async function requestPermissionDecisionFromUi(
   title: string,
   message: string,
   options?: RequestPermissionOptions,
+  signal?: AbortSignal,
 ): Promise<UnattributedDecision> {
+  // Threaded onto every host dialog this fallback opens so the settlement seam
+  // can abort a pending `select`/`input` when a remote answer arrives. Passed
+  // only when a signal exists, so the non-seam path calls `select` with its
+  // original two arguments (#seam).
+  const opts: readonly [ExtensionUIDialogOptions] | readonly [] = signal
+    ? [{ signal }]
+    : [];
   const sessionOption = options?.sessionLabel ?? APPROVE_FOR_SESSION_OPTION;
   const widthOption = options?.sessionWidth?.label;
   const decisionOptions = [
@@ -156,7 +173,11 @@ export async function requestPermissionDecisionFromUi(
     DENY_WITH_REASON_OPTION,
   ];
 
-  const selected = await ui.select(`${title}\n${message}`, decisionOptions);
+  const selected = await ui.select(
+    `${title}\n${message}`,
+    decisionOptions,
+    ...opts,
+  );
 
   if (selected === APPROVE_OPTION) {
     return {
@@ -171,10 +192,14 @@ export async function requestPermissionDecisionFromUi(
     const width: SessionGrantWidth =
       selected === widthOption ? "family" : "proven";
     if (options?.sessionScope) {
-      const scope = await ui.select(`${title}\nApply this session grant to:`, [
-        options.sessionScope.subagentLabel,
-        options.sessionScope.servingSessionLabel,
-      ]);
+      const scope = await ui.select(
+        `${title}\nApply this session grant to:`,
+        [
+          options.sessionScope.subagentLabel,
+          options.sessionScope.servingSessionLabel,
+        ],
+        ...opts,
+      );
       return sessionApproval(
         // A cancelled scope select (undefined) falls back to the
         // least-privilege subagent scope.
@@ -192,6 +217,7 @@ export async function requestPermissionDecisionFromUi(
       await ui.input(
         `${title}\nShare why this request was denied (optional).`,
         "Reason shown back to the agent",
+        ...opts,
       ),
     );
 

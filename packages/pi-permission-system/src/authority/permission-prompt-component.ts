@@ -21,6 +21,7 @@ import type { PromptPayload } from "#src/presentation/prompt-payload";
 import { collapsePastedNewlines } from "./bracketed-paste";
 import type { DecisionSource, UserDecisionSurface } from "./decision-source";
 import {
+  createDeniedPermissionDecision,
   type PermissionPromptDecision,
   type RequestPermissionOptions,
   requestPermissionDecisionFromUi,
@@ -70,6 +71,26 @@ export interface PromptPreferences {
 }
 
 /**
+ * The remote-settlement half of the prompt seam: the caller hands
+ * {@link requestPermissionDecision} an `onPrompt` callback, and the dispatcher
+ * hands that callback back a `control` it can use to settle the *showing*
+ * prompt from elsewhere (the phone, via `registerPromptAnswerer`).
+ *
+ * `settleRemotely` tears the human dialog down and resolves the decision with
+ * the answerer-attributed decision the caller passes — pre-attributed, because
+ * only the caller knows the answerer's name (#726). First settlement wins: a
+ * human answer that arrives first makes the remote one a no-op, and vice versa.
+ */
+export interface RemotePromptControl {
+  settleRemotely(decision: PermissionPromptDecision): void;
+}
+
+/** The seam the caller supplies to observe a prompt going on screen. */
+export interface PromptSeam {
+  onPrompt(control: RemotePromptControl): void;
+}
+
+/**
  * Route a permission ask to the inline keybind dialog in TUI mode, or the
  * `select()`/`input()` flow otherwise (RPC / frontend — the #519 constraint).
  *
@@ -80,18 +101,46 @@ export interface PromptPreferences {
  * answered on, so it is where the decision is attributed to that surface
  * (#726). Having the dialog model and the fallback each name themselves would
  * be two sites that must agree with this branch.
+ *
+ * When a `seam` is supplied, both branches funnel the human producer and a
+ * remote producer through one first-wins settlement: the TUI branch tears down
+ * the inline dialog on a remote answer, and the fallback aborts the pending
+ * `select`. With no `seam` — every caller before the prompt-answerer patch, and
+ * every test that does not exercise it — the behavior is byte-for-byte the
+ * original: the same two-argument `select`, the same single `await`.
  */
 export async function requestPermissionDecision(
   view: PermissionPromptView,
   title: string,
   payload: PromptPayload,
   options?: RequestPermissionOptions,
+  seam?: PromptSeam,
 ): Promise<PermissionPromptDecision> {
   if (view.mode === "tui") {
-    return attributeToHuman(
-      await presentInlinePermissionPrompt(view, title, payload, options),
-      "dialog",
-    );
+    if (!seam) {
+      return attributeToHuman(
+        await presentInlinePermissionPrompt(view, title, payload, options),
+        "dialog",
+      );
+    }
+    return settleFirst((resolveOnce) => {
+      let close: ((decision: UnattributedDecision) => void) | undefined;
+      void presentInlinePermissionPrompt(
+        view,
+        title,
+        payload,
+        options,
+        (closer) => {
+          close = closer;
+        },
+      ).then((decision) => resolveOnce(attributeToHuman(decision, "dialog")));
+      return (decision) => {
+        resolveOnce(decision);
+        // Tear the inline dialog down: `done` resolves the `ui.custom` promise,
+        // whose `.then` above is a no-op now that `resolveOnce` has fired.
+        close?.(createDeniedPermissionDecision());
+      };
+    }, seam);
   }
   // The fallback renders once and cannot re-render, so it neither paints nor
   // offers an expansion; it substitutes a nominal width for the terminal size
@@ -100,15 +149,62 @@ export async function requestPermissionDecision(
     ...view.budget,
     width: FALLBACK_RENDER_WIDTH,
   });
-  return attributeToHuman(
-    await requestPermissionDecisionFromUi(
+  const message = rendered.lines.join("\n");
+  if (!seam) {
+    return attributeToHuman(
+      await requestPermissionDecisionFromUi(view.ui, title, message, options),
+      "select",
+    );
+  }
+  return settleFirst((resolveOnce) => {
+    const controller = new AbortController();
+    void requestPermissionDecisionFromUi(
       view.ui,
       title,
-      rendered.lines.join("\n"),
+      message,
       options,
-    ),
-    "select",
-  );
+      controller.signal,
+    )
+      .then((decision) => resolveOnce(attributeToHuman(decision, "select")))
+      .catch(() => {
+        // An aborted `select`/`input` may reject rather than resolve; the
+        // remote decision has already settled the outer promise, so the
+        // rejection is spent.
+      });
+    return (decision) => {
+      resolveOnce(decision);
+      controller.abort();
+    };
+  }, seam);
+}
+
+/**
+ * Run one first-wins settlement across a human producer and a remote answerer.
+ *
+ * `start` wires the human producer to `resolveOnce` and returns the teardown
+ * the remote path runs; the returned teardown is handed to the seam's
+ * `onPrompt` as `settleRemotely`. The `settled` latch is what makes whichever
+ * answer lands first the decision and the other a no-op on a resolved promise.
+ */
+function settleFirst(
+  start: (
+    resolveOnce: (decision: PermissionPromptDecision) => void,
+  ) => (decision: PermissionPromptDecision) => void,
+  seam: PromptSeam,
+): Promise<PermissionPromptDecision> {
+  const { promise, resolve } =
+    Promise.withResolvers<PermissionPromptDecision>();
+  let settled = false;
+  const resolveOnce = (decision: PermissionPromptDecision): void => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    resolve(decision);
+  };
+  const settleRemotely = start(resolveOnce);
+  seam.onPrompt({ settleRemotely });
+  return promise;
 }
 
 function attributeToHuman(
@@ -142,6 +238,7 @@ export function presentInlinePermissionPrompt(
   title: string,
   payload: PromptPayload,
   options?: RequestPermissionOptions,
+  onClose?: (close: (decision: UnattributedDecision) => void) => void,
 ): Promise<UnattributedDecision> {
   const config: PromptModelConfig = {
     doublePressToConfirm: view.doublePressToConfirm,
@@ -150,9 +247,16 @@ export function presentInlinePermissionPrompt(
     sessionScope: options?.sessionScope,
     keys: view.dialogKeys,
   };
-  return view.ui.custom<UnattributedDecision>(
-    (tui, theme, keybindings, done) =>
-      new PermissionPromptComponent(
+  // The component's `done` is created by the host inside the factory below and
+  // is otherwise sealed in that closure. Capturing it here lets the settlement
+  // seam resolve the `ui.custom` promise from outside, tearing the dialog down
+  // when a remote answer wins, with no behavior change when `onClose` is absent
+  // (every non-seam caller).
+  let done: ((decision: UnattributedDecision) => void) | undefined;
+  const promise = view.ui.custom<UnattributedDecision>(
+    (tui, theme, keybindings, resolve) => {
+      done = resolve;
+      return new PermissionPromptComponent(
         theme,
         config,
         title,
@@ -162,10 +266,13 @@ export function presentInlinePermissionPrompt(
         () => {
           tui.requestRender();
         },
-        done,
-      ),
+        resolve,
+      );
+    },
     { overlay: false },
   );
+  onClose?.((decision) => done?.(decision));
+  return promise;
 }
 
 /**

@@ -328,6 +328,34 @@ The permission system does exactly that internally: a subagent child that is mis
 There is deliberately **no** equivalent reader for `registerAuthorizer`.
 A chain link returns a verdict, and live authority converges at the adjudicating node ([ADR 0007] §7) — inheriting one would run authority an operator's own extension exclusion removed.
 
+#### `registerPromptAnswerer`
+
+Register a named **prompt answerer**, permitted to settle a permission prompt that is already on screen — the phone answering the same dialog the operator sees, driven by `pi-hail`.
+
+```typescript
+registerPromptAnswerer(name: string): PromptAnswerer;
+
+interface PromptAnswerer {
+  answer(requestId: string, verdict: "allow" | "deny"): boolean;
+  dispose(): void;
+}
+```
+
+The permission system draws the one dialog, so only it can settle that dialog cleanly.
+An answerer answers the same prompt — it draws nothing and raises no alerts — and it can only answer a prompt that is actually showing: a queued-not-yet-shown ask has no `permissions:ui_prompt` yet, and no open prompt to answer.
+
+`answer(requestId, verdict)` settles the showing prompt with that `requestId` and returns `true`.
+It returns `false` when no such prompt is open — already settled, never shown, or queued — and when the answerer is not authorized (below).
+The first answer wins; a later answer, from either surface, returns `false`.
+Take the `requestId` from the `permissions:ui_prompt` broadcast.
+
+**Authority is opt-in, exactly like `authorizerChain`.**
+Registration grants nothing: an answer is effective only when `name` is listed in the `promptAnswerers` config key.
+An unlisted answerer's `answer` returns `false` and is logged once.
+A settled prompt resolves with `decidedBy: { kind: "answerer", name }`, so its `permissions:decision` carries `answerer_approved` / `answerer_denied` and the review log records the answerer's name.
+
+Register from a `permissions:ready` handler so registration is robust to load order, and guard on the returned disposer as with the other registrars.
+
 #### Subagent session registration
 
 Subagent registration is announcement-driven, and the spawner makes no service call.
@@ -497,6 +525,7 @@ pi.events.on("permissions:decision", (raw) => {
 | `origin`         | `string \| null`                            | Config scope that contributed the winning rule                                                        |
 | `agentName`      | `string \| null`                            | Active agent name when known                                                                          |
 | `matchedPattern` | `string \| null`                            | Pattern from the winning rule                                                                         |
+| `decidedBy`      | `DecisionSource`                            | What decided this request, stamped by the site that decided it (e.g. `{ kind: "answerer", name }`)     |
 | `forwarding`     | `ForwardedPromptContext \| null` (optional) | Requesting subagent, on a decision made while serving a forwarded request; absent on a local decision |
 
 ### Resolution Values
@@ -512,6 +541,8 @@ pi.events.on("permissions:decision", (raw) => {
 | `user_denied`                 | User denied via dialog                                               |
 | `authorizer_allowed`          | A registered `authorizerChain` link granted the ask — no human asked |
 | `authorizer_denied`           | A registered `authorizerChain` link refused the ask — no human asked |
+| `answerer_approved`           | A listed `promptAnswerers` answerer approved the showing prompt remotely |
+| `answerer_denied`             | A listed `promptAnswerers` answerer denied the showing prompt remotely |
 | `auto_approved`               | Yolo mode — approved automatically without dialog                    |
 | `confirmation_unavailable`    | State was `ask` but no UI was available — blocked                    |
 | `gate_error`                  | The gate threw, or an escalation failed — blocked, fail-closed       |

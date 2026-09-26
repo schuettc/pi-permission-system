@@ -91,6 +91,18 @@ describe("resolutionFor", () => {
     });
   });
 
+  describe("a prompt answerer", () => {
+    const answerer: DecisionSource = { kind: "answerer", name: "pi-hail" };
+
+    it("names a remote approval answerer_approved", () => {
+      expect(resolutionFor(answerer, ALLOWED)).toBe("answerer_approved");
+    });
+
+    it("names a remote denial answerer_denied", () => {
+      expect(resolutionFor(answerer, REFUSED)).toBe("answerer_denied");
+    });
+  });
+
   describe("nobody ruled", () => {
     it("names an unreachable authority confirmation_unavailable", () => {
       expect(

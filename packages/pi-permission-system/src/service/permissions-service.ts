@@ -2,8 +2,9 @@ import type { AccessIntent } from "#src/access-intent/access-intent";
 import { buildAccessIntentForSurface } from "#src/access-intent/input-normalizer";
 import type { Authorizer } from "#src/authority/authorizer";
 import type { AuthorizerRegistrar } from "#src/authority/authorizer-registry";
+import type { OpenPromptRegistry } from "#src/authority/prompt-answerer-registry";
 import type { PathNormalizer } from "#src/path/path-normalizer";
-import type { PermissionsService } from "#src/service";
+import type { PermissionsService, PromptAnswerer } from "#src/service";
 import type {
   ToolAccessExtractor,
   ToolAccessExtractorLookup,
@@ -34,6 +35,20 @@ interface PathNormalizerProvider {
 }
 
 /**
+ * The prompt-answerer authority the service consults per `answer`: the
+ * operator's opt-in list, the showing-prompt registry, and a warn sink for the
+ * once-per-name notice an unlisted answerer earns.
+ */
+export interface PromptAnswererDeps {
+  /** The operator's `promptAnswerers` list, read live so a config edit applies. */
+  getPromptAnswerers: () => string[];
+  /** The node's showing-prompt registry, settled by an effective answer. */
+  registry: OpenPromptRegistry;
+  /** Warns once per unlisted answerer that its answer was inert. */
+  warn: (message: string) => void;
+}
+
+/**
  * In-process implementation of the cross-extension {@link PermissionsService}.
  *
  * Constructed once in the composition root and backed by the single shared
@@ -44,6 +59,9 @@ interface PathNormalizerProvider {
  * do (#503); non-path surfaces stay on the `tool` intent.
  */
 export class LocalPermissionsService implements PermissionsService {
+  /** Unlisted answerer names already warned about, so the notice fires once. */
+  private readonly warnedUnlistedAnswerers = new Set<string>();
+
   constructor(
     private readonly resolver: ResolverForService,
     private readonly session: PathNormalizerProvider,
@@ -52,6 +70,7 @@ export class LocalPermissionsService implements PermissionsService {
     private readonly accessExtractorRegistry: ToolAccessExtractorRegistrar &
       ToolAccessExtractorLookup,
     private readonly authorizerRegistry: AuthorizerRegistrar,
+    private readonly promptAnswerers: PromptAnswererDeps,
   ) {}
 
   checkPermission(
@@ -122,5 +141,44 @@ export class LocalPermissionsService implements PermissionsService {
     authorize: Authorizer["authorize"],
   ): ReturnType<PermissionsService["registerAuthorizer"]> {
     return this.authorizerRegistry.register(name, authorize);
+  }
+
+  registerPromptAnswerer(name: string): PromptAnswerer {
+    return {
+      answer: (requestId, verdict) =>
+        this.answerPrompt(name, requestId, verdict),
+      dispose: () => {
+        // Registration granted nothing (authority is the config's), so there
+        // is nothing to unregister; clearing the warn latch lets a later
+        // registration under the same name warn afresh.
+        this.warnedUnlistedAnswerers.delete(name);
+      },
+    };
+  }
+
+  /**
+   * Settle the showing prompt on behalf of `name`, gated by the config.
+   *
+   * An unlisted answerer decides nothing and is told once; a listed one's
+   * answer settles the prompt through the registry, which returns `false` when
+   * the prompt is already settled, was never shown, or is queued-not-yet-shown.
+   */
+  private answerPrompt(
+    name: string,
+    requestId: string,
+    verdict: "allow" | "deny",
+  ): boolean {
+    if (!this.promptAnswerers.getPromptAnswerers().includes(name)) {
+      if (!this.warnedUnlistedAnswerers.has(name)) {
+        this.warnedUnlistedAnswerers.add(name);
+        this.promptAnswerers.warn(
+          `Prompt answerer '${name}' answered a permission prompt but is not ` +
+            `listed in promptAnswerers; the answer was ignored. Add '${name}' ` +
+            `to promptAnswerers to let it settle prompts.`,
+        );
+      }
+      return false;
+    }
+    return this.promptAnswerers.registry.settle(requestId, verdict, name);
   }
 }

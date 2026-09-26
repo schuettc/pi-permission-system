@@ -4,6 +4,7 @@ import { LocalUserAuthorizer } from "#src/authority/local-user-authorizer";
 import type { PermissionPromptDecision } from "#src/authority/permission-dialog";
 import type { requestPermissionDecision } from "#src/authority/permission-prompt-component";
 import type { PromptPermissionDetails } from "#src/authority/permission-prompter";
+import { OpenPromptRegistry } from "#src/authority/prompt-answerer-registry";
 import { DECIDED_BY_HUMAN } from "#test/helpers/decision-fixtures";
 import {
   makePromptDetails,
@@ -505,6 +506,118 @@ describe("LocalUserAuthorizer", () => {
         denialReason: "the session ended",
         decidedBy: { kind: "unavailable", reason: "the session ended" },
       });
+    });
+  });
+
+  describe("prompt-answer seam", () => {
+    /**
+     * A `requestPermissionDecision` double that never settles on its own but
+     * exposes the seam's `settleRemotely` to the test, so a registry answer is
+     * the only thing that can resolve the ask.
+     */
+    function remoteOnlyDecisionFn() {
+      const decisionFn = vi.fn<typeof requestPermissionDecision>(
+        (_view, _title, _payload, _options, seam) =>
+          new Promise<PermissionPromptDecision>((resolve) => {
+            seam?.onPrompt({ settleRemotely: resolve });
+          }),
+      );
+      return { decisionFn };
+    }
+
+    it("registers the showing prompt so an answerer can settle it", async () => {
+      const registry = new OpenPromptRegistry();
+      const { decisionFn } = remoteOnlyDecisionFn();
+      const { deps } = makeDeps({ requestPermissionDecision: decisionFn });
+      const authorizer = new LocalUserAuthorizer({ ...deps, registry });
+
+      const result = authorizer.authorize(makeDetails());
+      await settleMicrotasks();
+
+      // The prompt is registered only once it is actually on screen.
+      expect(registry.settle("req-123", "allow", "pi-hail")).toBe(true);
+      await expect(result).resolves.toEqual({
+        approved: true,
+        state: "approved",
+        decidedBy: { kind: "answerer", name: "pi-hail" },
+      });
+    });
+
+    it("attributes a remote denial to the answerer, not the user", async () => {
+      const registry = new OpenPromptRegistry();
+      const { decisionFn } = remoteOnlyDecisionFn();
+      const { deps } = makeDeps({ requestPermissionDecision: decisionFn });
+      const authorizer = new LocalUserAuthorizer({ ...deps, registry });
+
+      const result = authorizer.authorize(makeDetails());
+      await settleMicrotasks();
+      registry.settle("req-123", "deny", "pi-hail");
+
+      await expect(result).resolves.toEqual({
+        approved: false,
+        state: "denied",
+        decidedBy: { kind: "answerer", name: "pi-hail" },
+      });
+    });
+
+    it("unregisters the prompt once the human answered", async () => {
+      const registry = new OpenPromptRegistry();
+      const decisionFn = vi.fn<typeof requestPermissionDecision>(
+        (_view, _title, _payload, _options, seam) => {
+          // Register through the seam, then resolve as the human would.
+          seam?.onPrompt({ settleRemotely: () => undefined });
+          return Promise.resolve(APPROVED);
+        },
+      );
+      const { deps } = makeDeps({ requestPermissionDecision: decisionFn });
+      const authorizer = new LocalUserAuthorizer({ ...deps, registry });
+
+      await authorizer.authorize(makeDetails());
+
+      // The finally disposed the registration, so a late answer is a no-op.
+      expect(registry.settle("req-123", "allow", "pi-hail")).toBe(false);
+    });
+
+    it("unregisters the prompt when the session releases it", async () => {
+      // A release settles the ask's *outer* run promise while the host's dialog
+      // promise stays pending forever, so the disposer must hang off that outer
+      // settle \u2014 otherwise the entry lingers and a shutdown-time answer
+      // returns a misleading `true`.
+      const registry = new OpenPromptRegistry();
+      const { decisionFn } = remoteOnlyDecisionFn();
+      const { deps, dialogs } = makeDeps({
+        requestPermissionDecision: decisionFn,
+      });
+      const authorizer = new LocalUserAuthorizer({ ...deps, registry });
+
+      const result = authorizer.authorize(makeDetails());
+      await settleMicrotasks();
+
+      dialogs.releaseAll("the session ended");
+      await settleMicrotasks();
+
+      // The release disposed the registration: no entry, and a late answer is a
+      // no-op rather than a misleading success.
+      expect(registry.settle("req-123", "allow", "pi-hail")).toBe(false);
+      await expect(result).resolves.toMatchObject({
+        approved: false,
+        confirmationUnavailable: true,
+      });
+    });
+
+    it("leaves the dialog the only path when no registry is wired", async () => {
+      const { deps, decisionFn } = makeDeps();
+      const authorizer = new LocalUserAuthorizer(deps);
+
+      await authorizer.authorize(makeDetails());
+
+      // Backwards-compatible call shape: no seam argument is passed.
+      expect(decisionFn).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(String),
+        expect.anything(),
+        undefined,
+      );
     });
   });
 });

@@ -8,6 +8,7 @@
  * removed or renamed without a semver-major version bump.
  */
 
+import type { DecisionSource } from "#src/authority/decision-source";
 import type { PromptRequestFacts } from "#src/presentation/prompt-payload";
 
 /** Minimal event bus interface required by the emit helpers. */
@@ -143,6 +144,10 @@ export type PermissionDecisionResolution =
   | "authorizer_allowed"
   /** A registered `authorizerChain` link refused the ask; no human was asked. */
   | "authorizer_denied"
+  /** A registered prompt answerer approved the showing prompt remotely (e.g. the phone). */
+  | "answerer_approved"
+  /** A registered prompt answerer denied the showing prompt remotely (e.g. the phone). */
+  | "answerer_denied"
   /** The gate threw, or an escalation failed, and the request was blocked. */
   | "gate_error";
 
@@ -162,6 +167,15 @@ export interface PermissionDecisionEvent {
   result: "allow" | "deny";
   /** How the decision was reached. */
   resolution: PermissionDecisionResolution;
+  /**
+   * What decided this request, stamped by the site that decided it.
+   *
+   * Required: every emit site already has the decider in hand (#726), and the
+   * type is what guarantees a consumer such as pi-hail — which reads
+   * `decidedBy.kind === "answerer"` to tell a phone answer from a Mac one — can
+   * rely on it being present.
+   */
+  decidedBy: DecisionSource;
   /** Which config scope contributed the winning rule (when available). */
   origin: string | null;
   /** Agent name (when known). */
