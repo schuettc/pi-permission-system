@@ -231,6 +231,7 @@ describe("createFailClosedToolCall", () => {
         value: "git push",
         result: "deny",
         resolution: "gate_error",
+        decidedBy: { kind: "gate_error", reason: "parser init failed" },
         origin: null,
         agentName: null,
         matchedPattern: null,

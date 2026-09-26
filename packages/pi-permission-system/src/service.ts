@@ -242,6 +242,39 @@ export interface PermissionsService extends PermissionQuery {
     name: string,
     authorize: Authorizer["authorize"],
   ): () => void;
+
+  /**
+   * Register a named prompt answerer, permitted to settle a *showing*
+   * permission prompt remotely (the phone answering through pi-hail).
+   *
+   * The seam the permission system owns: it draws the one dialog, so only it
+   * can settle that dialog cleanly. An answerer answers the same prompt the
+   * human sees; it never draws its own, and it cannot answer a queued ask that
+   * has not been shown (it has no `permissions:ui_prompt` yet).
+   *
+   * Registration alone grants **no authority**: the returned answerer's
+   * `answer` is effective only when `name` is listed in the `promptAnswerers`
+   * config (opt-in activation, mirroring `authorizerChain`). An unlisted
+   * answerer's `answer` returns `false` and is logged once. Register from a
+   * `permissions:ready` handler so registration is robust to load order.
+   *
+   * @param name - Operator-facing answerer name referenced from `promptAnswerers`.
+   */
+  registerPromptAnswerer(name: string): PromptAnswerer;
+}
+
+/**
+ * The capability {@link PermissionsService.registerPromptAnswerer} returns.
+ *
+ * `answer` settles the showing prompt identified by `requestId` and returns
+ * `false` when no such prompt is open (already settled, never shown, or
+ * queued-not-yet-shown) or when the answerer is not listed in `promptAnswerers`
+ * (first answer wins; later answers return `false`). `dispose` releases the
+ * registration.
+ */
+export interface PromptAnswerer {
+  answer(requestId: string, verdict: "allow" | "deny"): boolean;
+  dispose(): void;
 }
 
 /**

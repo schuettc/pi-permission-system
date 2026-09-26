@@ -17,6 +17,7 @@ import type { AuthorizerSelectionConstructorDeps } from "#src/authority/authoriz
 import { ForwardingLivenessJudge } from "#src/authority/forwarding-liveness";
 import { SUBAGENT_ENV_HINT_KEYS } from "#src/authority/permission-forwarding";
 import type { PermissionPrompterApi } from "#src/authority/permission-prompter";
+import { OpenPromptRegistry } from "#src/authority/prompt-answerer-registry";
 import { ServingSessionRegistry } from "#src/authority/serving-registry";
 import type { SubagentDetector } from "#src/authority/subagent-detection";
 import type { PermissionQuery } from "#src/service";
@@ -144,6 +145,8 @@ export function makeAuthorizerSelectionDeps(
         heartbeats: { read: () => "absent", servingIds: () => [] },
       }),
     getForwardingTimeoutMs: overrides.getForwardingTimeoutMs ?? (() => 1000),
+    promptAnswererRegistry:
+      overrides.promptAnswererRegistry ?? new OpenPromptRegistry(),
     logger: overrides.logger ?? makeAuthorizerLog(),
     prompter: overrides.prompter ?? makePrompterApi(),
     getPermissionQuery: overrides.getPermissionQuery ?? (() => makeQuery()),

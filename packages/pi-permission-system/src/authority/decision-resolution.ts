@@ -43,6 +43,8 @@ export function resolutionFor(
       return "auto_approved";
     case "authorizer":
       return outcome.approved ? "authorizer_allowed" : "authorizer_denied";
+    case "answerer":
+      return outcome.approved ? "answerer_approved" : "answerer_denied";
     case "unavailable":
       return "confirmation_unavailable";
     case "gate_error":

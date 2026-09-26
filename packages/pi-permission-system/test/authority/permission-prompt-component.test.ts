@@ -1,6 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import type {
+  PermissionPromptDecision,
   RequestPermissionOptions,
   UnattributedDecision,
 } from "#src/authority/permission-dialog";
@@ -8,6 +9,7 @@ import {
   type PermissionPromptUi,
   type PermissionPromptView,
   presentInlinePermissionPrompt,
+  type RemotePromptControl,
   requestPermissionDecision,
 } from "#src/authority/permission-prompt-component";
 import { DEFAULT_DIALOG_KEYS } from "#src/config/dialog-keys";
@@ -539,6 +541,125 @@ describe("presentInlinePermissionPrompt", () => {
         state: "denied",
         decidedBy: { kind: "user", via: "select" },
       });
+    });
+  });
+
+  describe("prompt-answer seam", () => {
+    const answererApproval: PermissionPromptDecision = {
+      approved: true,
+      state: "approved",
+      decidedBy: { kind: "answerer", name: "pi-hail" },
+    };
+
+    /** A TUI view whose captured `done` records the dialog teardown. */
+    function makeSeamTuiView() {
+      const captured: {
+        component?: CapturedComponent;
+        done?: ReturnType<typeof vi.fn>;
+      } = {};
+      const custom = (factory: PromptFactory): Promise<UnattributedDecision> =>
+        new Promise<UnattributedDecision>((resolve) => {
+          const done = vi.fn(resolve);
+          captured.done = done;
+          captured.component = factory(
+            { requestRender: vi.fn() },
+            plainTheme(),
+            { matches: () => false },
+            done,
+          );
+        });
+      const view = makeView("tui", true, {
+        select: vi.fn(),
+        input: vi.fn(),
+        custom,
+        getToolsExpanded: vi.fn(() => false),
+        setToolsExpanded: vi.fn(),
+      });
+      return { view, captured };
+    }
+
+    it("settles the TUI dialog remotely and tears the dialog down", async () => {
+      const { view, captured } = makeSeamTuiView();
+      let control: RemotePromptControl | undefined;
+      const promise = requestPermissionDecision(view, "Title", ASK, undefined, {
+        onPrompt: (received) => {
+          control = received;
+        },
+      });
+
+      expect(captured.component).toBeDefined();
+      control?.settleRemotely(answererApproval);
+
+      expect(await promise).toEqual(answererApproval);
+      // The inline dialog is torn down: its `done` was invoked so the
+      // `ui.custom` promise cannot strand.
+      expect(captured.done).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets a human answer win when it settles first", async () => {
+      const { view, captured } = makeFakeView(true);
+      let control: RemotePromptControl | undefined;
+      const promise = requestPermissionDecision(view, "Title", ASK, undefined, {
+        onPrompt: (received) => {
+          control = received;
+        },
+      });
+
+      captured.component?.handleInput("y");
+      captured.component?.handleInput("y");
+      const decision = await promise;
+      // A remote answer that arrives after the human is a no-op.
+      control?.settleRemotely(answererApproval);
+
+      expect(decision).toEqual({
+        approved: true,
+        state: "approved",
+        decidedBy: { kind: "user", via: "dialog" },
+      });
+    });
+
+    it("aborts the select fallback on a remote answer and resolves with it", async () => {
+      let capturedOpts: { signal?: AbortSignal } | undefined;
+      const select = vi.fn(
+        (
+          _title: string,
+          _options: string[],
+          opts?: { signal?: AbortSignal },
+        ) => {
+          capturedOpts = opts;
+          // Never resolves on its own: the remote answer settles the outer
+          // promise, and the abort is what frees the host dialog.
+          return new Promise<string | undefined>(() => undefined);
+        },
+      );
+      const view = makeView("rpc", true, {
+        select,
+        input: vi.fn(),
+        custom: vi.fn(),
+      });
+      let control: RemotePromptControl | undefined;
+      const answererDenial: PermissionPromptDecision = {
+        approved: false,
+        state: "denied",
+        decidedBy: { kind: "answerer", name: "pi-hail" },
+      };
+      const promise = requestPermissionDecision(view, "Title", ASK, undefined, {
+        onPrompt: (received) => {
+          control = received;
+        },
+      });
+
+      control?.settleRemotely(answererDenial);
+
+      expect(await promise).toEqual(answererDenial);
+      expect(select).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        {
+          signal: expect.any(AbortSignal),
+        },
+      );
+      expect(capturedOpts?.signal?.aborted).toBe(true);
     });
   });
 

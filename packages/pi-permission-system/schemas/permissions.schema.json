@@ -136,6 +136,16 @@
         "minLength": 1
       }
     },
+    "promptAnswerers": {
+      "description": "Names of registered prompt answerers permitted to settle a showing permission prompt remotely (e.g. the phone, via pi-hail). Opt-in mirror of authorizerChain: registration grants nothing; an answerer decides nothing until it is named here. Defaults to an empty list (no answerers).",
+      "markdownDescription": "Names of registered **prompt answerers** permitted to settle a showing permission prompt remotely — an answerer answers the same dialog the permission system already put on screen (the phone answering through `pi-hail`, for example).\n\nThis is the opt-in mirror of `authorizerChain`: an extension that calls `registerPromptAnswerer` gains **no authority** by registering; its `answer` is effective only once you name it here. An unlisted answerer's `answer` returns `false` and is logged once.\n\nA remote answer approves once or denies, with no reason text; session-scope grants stay on the Mac dialog. Defaults to an empty list (no answerers).",
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "permission": {
       "type": "object",
       "properties": {

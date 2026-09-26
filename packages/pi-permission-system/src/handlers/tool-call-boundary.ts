@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { DecisionSource } from "#src/authority/decision-source";
 import type { GateOutcome } from "#src/handlers/gates/types";
 import type { DecisionRecorder } from "#src/logging/decision-audit";
 import type { DecisionReporter } from "#src/logging/decision-reporter";
@@ -85,14 +86,15 @@ function recordGateError(
     const requestId = createPermissionRequestId();
     const toolName = bestEffortToolName(event);
     const command = bestEffortCommand(event);
+    // The boundary decided, by failing closed -- no rule and no human did.
+    const decidedBy: DecisionSource = { kind: "gate_error", reason };
     reporter.writeReviewLog("permission_request.blocked", {
       requestId,
       toolName,
       command,
       resolution: "gate_error",
       error: reason,
-      // The boundary decided, by failing closed -- no rule and no human did.
-      decidedBy: { kind: "gate_error", reason },
+      decidedBy,
     });
     reporter.emitDecision({
       requestId,
@@ -100,6 +102,7 @@ function recordGateError(
       value: command ?? toolName,
       result: "deny",
       resolution: "gate_error",
+      decidedBy,
       origin: null,
       agentName: null,
       matchedPattern: null,
