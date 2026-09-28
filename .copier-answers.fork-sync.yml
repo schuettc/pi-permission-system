@@ -1,0 +1,16 @@
+# This file records the answers muda used to render this kit.
+# It is managed by muda (copier). Do not edit by hand; re-render instead.
+_commit: v0.2.0
+_src_path: https://github.com/schuettc/muda.git
+build_cmd: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @gotgenes/pi-permission-system
+    run build:types
+cron_minute: 35
+kit: fork-sync
+pkg_dir: packages/pi-permission-system
+pkg_name: '@schuettc/pi-permission-system'
+tag_prefix: pi-permission-system-v
+test_cmd: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @gotgenes/pi-permission-system
+    run check && pnpm --filter @gotgenes/pi-permission-system test
+upstream_branch: main
+upstream_repo: gotgenes/pi-packages
+
