@@ -348,6 +348,7 @@ An answerer answers the same prompt — it draws nothing and raises no alerts �
 It returns `false` when no such prompt is open — already settled, never shown, or queued — and when the answerer is not authorized (below).
 The first answer wins; a later answer, from either surface, returns `false`.
 Take the `requestId` from the `permissions:ui_prompt` broadcast.
+A remote answer approves once or denies without a reason; session-scope grants stay on the dialog.
 
 **Authority is opt-in, exactly like `authorizerChain`.**
 Registration grants nothing: an answer is effective only when `name` is listed in the `promptAnswerers` config key.
@@ -525,7 +526,7 @@ pi.events.on("permissions:decision", (raw) => {
 | `origin`         | `string \| null`                            | Config scope that contributed the winning rule                                                        |
 | `agentName`      | `string \| null`                            | Active agent name when known                                                                          |
 | `matchedPattern` | `string \| null`                            | Pattern from the winning rule                                                                         |
-| `decidedBy`      | `DecisionSource`                            | What decided this request, stamped by the site that decided it (e.g. `{ kind: "answerer", name }`)     |
+| `decidedBy`      | `DecisionSource`                            | What decided this request, stamped by the site that decided it (e.g. `{ kind: "answerer", name }`)    |
 | `forwarding`     | `ForwardedPromptContext \| null` (optional) | Requesting subagent, on a decision made while serving a forwarded request; absent on a local decision |
 
 ### Resolution Values
@@ -541,8 +542,8 @@ pi.events.on("permissions:decision", (raw) => {
 | `user_denied`                 | User denied via dialog                                               |
 | `authorizer_allowed`          | A registered `authorizerChain` link granted the ask — no human asked |
 | `authorizer_denied`           | A registered `authorizerChain` link refused the ask — no human asked |
-| `answerer_approved`           | A listed `promptAnswerers` answerer approved the showing prompt remotely |
-| `answerer_denied`             | A listed `promptAnswerers` answerer denied the showing prompt remotely |
+| `answerer_approved`           | A listed `promptAnswerers` answerer approved the prompt remotely     |
+| `answerer_denied`             | A listed `promptAnswerers` answerer denied the prompt remotely       |
 | `auto_approved`               | Yolo mode — approved automatically without dialog                    |
 | `confirmation_unavailable`    | State was `ask` but no UI was available — blocked                    |
 | `gate_error`                  | The gate threw, or an escalation failed — blocked, fail-closed       |
